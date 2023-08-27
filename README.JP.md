@@ -10,6 +10,7 @@
 ENGLISH: [![en](https://img.shields.io/badge/lang-en-red.svg)](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/main/README.md)
 
 ## 更新情報
+- [APIを通しての利用について](#apiを通した利用方法)
 - プロンプトによる領域指定の[チュートリアル](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/main/prompt_ja.md)
 - 新機能 : [インペイントによる領域指定](#inpaint) (thanks [Symbiomatrix](https://github.com/Symbiomatrix))
 - 新機能 : [プロンプトによる領域指定](#divprompt) 
@@ -69,7 +70,7 @@ LoRAを分離したい場合こちらを使用して下さい。生成時間は�
 
 ~~三月末のweb-uiのアップデートでLoRAの適用方法が変更され、これにより生成時間が大幅に長くなります。アップデートに不具合があるというわけでは無く、普通の使い方をするなら生成時間を短縮する効果がありますが、領域別適応をする段においては逆効果になるようです。いくつか対策を考えてみましたがいまのところ回避策は思い浮かびません。~~
 
-### Divide mode
+### Split mode
 分割方向を指定します。水平、垂直方向が指定できます。
 
 ### Use common prompt
@@ -212,7 +213,72 @@ green dress
 ```
 と言うプロンプトがあった場合、共通の場合には領域1は`a girl red hair`というプロンプトで生成されます。ベースの場合で比率が0.2の場合には` (a girl) * 0.2 + (red hair) * 0.8`というプロンプトで生成されます。基本的には共通プロンプトで問題ありません。共通プロンプトの効きが強いという場合などはベースにしてみてもいいかもしれません。
 
-## 謝辞
+## APIを通した利用方法
+APIを通してこの拡張を利用する場合には次の書式を使います。
+```
+  "prompt": "green hair twintail BREAK red blouse BREAK blue skirt",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args": [True,False,"Matrix","Vertical","Mask","Prompt","1,1,1","",False,False,False,"Attention",False,"0","0","0",""]
+}}
+```
+`args`の各設定は下の表を参照して下さい。No.は順番に対応します。typeがtextになっている場合は`""`で囲って下さい。3-6のモード設定は3.のモードで選択したモードに対応するサブモード以外は無視されます。17.のマスクは画像データのアドレスを指定して下さい。アドレスは絶対パスか、web-uiルートからの相対パスが利用できます。マスクはマスクの項で指定された色を使用して作成して下さい。
+
+|  No.  |  setting  |choice| type  | default |
+| ---- | ---- |---- |----| ----|
+|  1  |  Active  |True, False|Bool|False| 
+|  2  | debug   |True, False|Bool|False| 
+|  3  | Mode  |Matrix, Mask, Prompt|Text| Matrix|
+|  4  | Mode (Matrix)|Horizontal, Vertical|Text|Horizontal
+|  5  | Mode (Mask)| Mask |Text|Mask 
+|  6  | Mode (Prompt)| Prompt, Prompt-Ex |Text|Prompt
+|  7 |  Ratios||Text|1,1,1
+|  8 |  Base Ratios  |  |Text| 0
+|  9 |  Use Base  |True, False|Bool|False| 
+|  10 | Use Common |True, False|Bool|False| 
+|  11 | Use Neg-Common   |True, False|Bool| False| 
+|  12 | Calcmode| Attention, Latent | Text  | Attention
+|  13 | Not Change AND   |True, False|Bool|False| 
+|  14 | LoRA Textencoder  ||Text|0|  
+|  15 | LoRA U-Net   |  | Text  | 0
+|  16 | Threshold   |  |Text| 0
+|  17 | Mask   |  | Text | 
+
+### 設定例
+#### Matrix
+```
+  "prompt": "green hair twintail BREAK red blouse BREAK blue skirt",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args": [True,False,"Matrix","Vertical","Mask","Prompt","1,1,1","",False,False,False,"Attention",False,"0","0","0",""]
+}}
+```
+結果
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample1.png)  
+
+#### Mask
+```
+   "prompt": "masterpiece,best quality 8k photo of BREAK (red:1.2) forest BREAK yellow chair BREAK blue dress girl",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args":	[True,False,"Mask","Vertical","Mask","Prompt","1,1,1","",False,True,False,"Attention",False,"0","0","0","mask.png"]
+```
+使用したマスク
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/mask.png)  
+結果
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample2.png)  
+
+### Prompt
+```
+ "prompt": "masterpiece,best quality 8k photo of BREAK a girl hair blouse skirt with bag BREAK (red:1.8) ,hair BREAK (green:1.5),blouse BREAK,(blue:1.7), skirt BREAK (yellow:1.7), bag",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args":	[True,False,"Prompt","Vertical","Mask","Prompt-EX","1,1,1","",False,True,False,"Attention",False,"0","0","0.5,0.6,0.5",""]
+}}
+```
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample3.png)  
+
+### 謝辞
 Attention coupleを提案された[furusu](https://note.com/gcem156)氏、Latent coupleを提案された[opparco](https://github.com/opparco)氏、2D生成のコード作成に協力して頂いた[Symbiomatrix](https://github.com/Symbiomatrix)に感謝します。
 
 

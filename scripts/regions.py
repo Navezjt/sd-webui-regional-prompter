@@ -7,7 +7,6 @@ import PIL
 import torch
 from modules import devices
 
-
 def lange(l):
     return range(len(l))
 
@@ -21,8 +20,6 @@ KEYBRK = "BREAK"
 KEYPROMPT = "ADDP"
 DELIMROW = ";"
 DELIMCOL = ","
-DELIMROW = ";"
-DELIMCOL = ","
 MCOLOUR = 256
 NLN = "\n"
 DKEYINOUT = { # Out/in, horizontal/vertical or row/col first.
@@ -33,6 +30,7 @@ DKEYINOUT = { # Out/in, horizontal/vertical or row/col first.
 }
 
 ALLKEYS = [KEYCOMM,KEYROW, KEYCOL, KEYBASE, KEYPROMPT]
+ALLALLKEYS = [KEYCOMM,KEYROW, KEYCOL, KEYBASE, KEYPROMPT, KEYBRK, "AND"]
 
 fidentity = lambda x: x
 ffloatd = lambda c: (lambda x: floatdef(x,c))
@@ -276,7 +274,7 @@ def makeimgtmp(aratios,mode,usecom,usebase,inprocess = False):
     else:
         (aratios2r,aratios2) = split_l2(aratios, DELIMROW, DELIMCOL, 
                                         indsingles = True, fmap = ffloatd(1), indflip = indflip)
-    # Change all splitters to breaks.
+
     (aratios2,aratios2r) = ratiosdealer(aratios2,aratios2r)
     
     h = w = 128
@@ -326,45 +324,32 @@ def makeimgtmp(aratios,mode,usecom,usebase,inprocess = False):
 fcountbrk = lambda x: x.count(KEYBRK)
 fint = lambda x: int(x)
 
-def matrixdealer(self, p, aratios, bratios, mode, usebase, comprompt,comnegprompt):
-    if self.usecom and KEYCOMM in p.prompt:
-        comprompt = p.prompt.split(KEYCOMM,1)[0]
-        p.prompt = p.prompt.split(KEYCOMM,1)[1]
-    elif self.usecom and KEYBRK in p.prompt:
-        comprompt = p.prompt.split(KEYBRK,1)[0]
-        p.prompt = p.prompt.split(KEYBRK,1)[1]
-    if self.usencom and KEYCOMM in p.negative_prompt:
-        comnegprompt = p.negative_prompt.split(KEYCOMM,1)[0]
-        p.negative_prompt = p.negative_prompt.split(KEYCOMM,1)[1]
-    elif self.usencom and KEYBRK in p.negative_prompt:
-        comnegprompt = p.negative_prompt.split(KEYBRK,1)[0]
-        p.negative_prompt = p.negative_prompt.split(KEYBRK,1)[1]
+def matrixdealer(self, p, aratios, bratios, mode):
+    print(aratios, bratios, mode)
+    if "Ran" in mode:
+        randdealer(self,p,aratios,bratios)
+        return 
     # The addrow/addcol syntax is better, cannot detect regular breaks without it.
     # In any case, the preferred method will anchor the L2 structure. 
-    if (KEYBASE in p.prompt.upper()): # Designated base.
-        self.usebase = True
-        baseprompt = p.prompt.split(KEYBASE,1)[0]
-        mainprompt = p.prompt.split(KEYBASE,1)[1] 
-        self.basebreak = fcountbrk(baseprompt)
-    elif usebase: # Get base by first break as usual.
-        baseprompt = p.prompt.split(KEYBRK,1)[0]
-        mainprompt = p.prompt.split(KEYBRK,1)[1]
-    else:
-        baseprompt = ""
-        mainprompt = p.prompt
+    # No prompt formatting is performed. Used only for region calculations
+    prompt = p.prompt
+    if self.debug: print("in matrixdealer",prompt)
+    if KEYCOMM in prompt: prompt = prompt.split(KEYCOMM,1)[1]
+    if KEYBASE in prompt: prompt = prompt.split(KEYBASE,1)[1]
+
     indflip = (mode == "Vertical")
-    if (KEYCOL in mainprompt.upper() or KEYROW in mainprompt.upper()):
-        breaks = mainprompt.count(KEYROW) + mainprompt.count(KEYCOL) + int(self.usebase)
+    if (KEYCOL in prompt.upper() or KEYROW in prompt.upper()):
+        breaks = prompt.count(KEYROW) + prompt.count(KEYCOL) + int(self.usebase)
         # Prompt anchors, count breaks between special keywords.
-        lbreaks = split_l2(mainprompt, KEYROW, KEYCOL, fmap = fcountbrk, indflip = indflip)
+        lbreaks = split_l2(prompt, KEYROW, KEYCOL, fmap = fcountbrk, indflip = indflip)
         if (DELIMROW not in aratios
-        and (KEYROW in mainprompt.upper()) != (KEYCOL in mainprompt.upper())):
+        and (KEYROW in prompt.upper()) != (KEYCOL in prompt.upper())):
             # By popular demand, 1d integrated into 2d.
             # This works by either adding a single row value (inner),
             # or setting flip to the reverse (outer).
             # Only applies when using just ADDROW / ADDCOL keys, and commas in ratio.
             indflip2 = False
-            if (KEYROW in mainprompt.upper()) == indflip:
+            if (KEYROW in prompt.upper()) == indflip:
                 aratios = "1" + DELIMCOL + aratios
             else:
                 indflip2 = True
@@ -377,18 +362,16 @@ def matrixdealer(self, p, aratios, bratios, mode, usebase, comprompt,comnegpromp
         # More like "bweights", applied per cell only.
         bratios2 = split_l2(bratios, DELIMROW, DELIMCOL, fmap = ffloatd(0), basestruct = lbreaks, indflip = indflip)
     else:
-        breaks = mainprompt.count(KEYBRK) + int(self.usebase)
+        breaks = prompt.count(KEYBRK) + int(self.usebase)
         (aratios2r,aratios2) = split_l2(aratios, DELIMROW, DELIMCOL, indsingles = True, fmap = ffloatd(1), indflip = indflip)
         # Cannot determine which breaks matter.
         lbreaks = split_l2("0", KEYROW, KEYCOL, fmap = fint, basestruct = aratios2, indflip = indflip)
         bratios2 = split_l2(bratios, DELIMROW, DELIMCOL, fmap = ffloatd(0), basestruct = lbreaks, indflip = indflip)
         # If insufficient breaks, try to broadcast prompt - a bit dumb.
-        breaks = fcountbrk(mainprompt)
-        lastprompt = mainprompt.rsplit(KEYBRK)[-1]
+        breaks = fcountbrk(prompt)
+        lastprompt = prompt.rsplit(KEYBRK)[-1]
         if l2_count(aratios2) > breaks: 
-            mainprompt = mainprompt + (fspace(KEYBRK) + lastprompt) * (l2_count(aratios2) - breaks) 
-    
-    # Change all splitters to breaks.
+            prompt = prompt + (fspace(KEYBRK) + lastprompt) * (l2_count(aratios2) - breaks) 
     (aratios,aratiosr) = ratiosdealer(aratios2,aratios2r)
     bratios = bratios2 
     
@@ -401,39 +384,9 @@ def matrixdealer(self, p, aratios, bratios, mode, usebase, comprompt,comnegpromp
             dcells.append(d)
         drow = RegionRow(aratiosr[r][0], aratiosr[r][1], dcells)
         drows.append(drow)
-    self.aratios = drows
-    # Convert all keys to breaks, and expand neg to fit.
-    mainprompt = mainprompt.replace(KEYROW,KEYBRK) # Cont: Should be case insensitive.
-    mainprompt = mainprompt.replace(KEYCOL,KEYBRK)
-    p.prompt = mainprompt
-    if self.usebase:
-        p.prompt = baseprompt + fspace(KEYBRK) + p.prompt 
-    #p.all_prompts = [p.prompt] * len(p.all_prompts)
 
-    npr = p.negative_prompt
-    npr.replace(KEYROW,KEYBRK)
-    npr.replace(KEYCOL,KEYBRK)
-    npr = npr.split(KEYBRK)
-    nbreaks = len(npr) - 1
-    if breaks >= nbreaks: # Repeating the first neg as in orig code.
-        npr.extend([npr[0]] * (breaks - nbreaks))
-    else: # Cut off the excess negs.
-        npr = npr[0:breaks + 1]
-    for i ,n in enumerate(npr):
-        if n.isspace() or n =="":
-            npr[i] = ","
-    # p.negative_prompt = fspace(KEYBRK).join(npr)
-    # p.all_negative_prompts = [p.negative_prompt] * len(p.all_negative_prompts)
-    # if comprompt is not None : 
-    #     p.prompt = comprompt + fspace(KEYBRK) + p.prompt
-    #     for i in lange(p.all_prompts):
-    #         p.all_prompts[i] = comprompt + fspace(KEYBRK) + p.all_prompts[i]
-    # if comnegprompt is not None :
-    #     p.negative_prompt = comnegprompt + fspace(KEYBRK) + p.negative_prompt
-    #     for i in lange(p.all_negative_prompts):
-    #         p.all_negative_prompts[i] = comnegprompt + fspace(KEYBRK) + p.all_negative_prompts[i]
-    p = keyreplacer(p)
-    return self, p
+    self.aratios = drows
+    self.bratios = bratios
 
 ################################################################
 ##### inpaint
@@ -602,7 +555,16 @@ def detect_image_colours(img, inddict = False):
     COLREG = deterministic_colours(2 * MAXCOLREG, COLREG)
     cow = index_rows(COLREG)
     regrows = [cow[(COLREG == f).all(axis = 1)] for f in lfltfix]
-    REGUSE = {reg[0,0]:reg[0,1:].tolist() for reg in regrows if len(reg) > 0}
+    # MAX_KEY_VALUE provides a threshold value. Only those colors are added to REGUSE, for which the key values 
+    # (i.e., the indices of the colors in the 'regrows' array) are less than this threshold.
+    # Colors with indices greater than MAX_KEY_VALUE are considered "similar colors" and are not treated as separate masks. 
+    unique_keys = set(reg[0,0] for reg in regrows if len(reg) > 0)
+    # The purpose of this is to reduce the number of colors being processed, particularly for colors that are 
+    # close to each other, which may be slightly different due to noise in the image or minor differences in color encoding.
+    # By setting an appropriate MAX_KEY_VALUE, these minor color differences can be effectively filtered out, 
+    # thereby reducing the number of colors being processed and making color processing more accurate and efficient.
+    MAX_KEY_VALUE = len(unique_keys) + 20
+    REGUSE = {reg[0,0]: reg[0,1:].tolist() for reg in regrows if len(reg) > 0 and reg[0,0] <= MAX_KEY_VALUE}
     # REGUSE.discard(COLWHITE)
     
     # Must set to dict due to gradio preprocess assertion, in preset load.
@@ -777,28 +739,11 @@ def create_canvas(h, w, indwipe = True):
 # SBM In mask mode, grabs each mask from coloured mask image.
 # If there's no base, remainder goes to first mask.
 # If there's a base, it will receive its own remainder mask, applied at 100%.
-def inpaintmaskdealer(self, p, bratios, usebase, polymask, comprompt, comnegprompt):
-    if self.usecom and KEYCOMM in p.prompt:
-        p.prompt = p.prompt.split(KEYCOMM,1)[1]
-    elif self.usecom and KEYBRK in p.prompt:
-        p.prompt = p.prompt.split(KEYBRK,1)[1]
-        
-    if self.usencom and KEYCOMM in p.negative_prompt:
-        p.negative_prompt = p.negative_prompt.split(KEYCOMM,1)[1]
-    elif self.usencom and KEYBRK in p.negative_prompt:
-        p.negative_prompt = p.negative_prompt.split(KEYBRK,1)[1]
-        
-    if (KEYBASE in p.prompt.upper()): # Designated base.
-        baseprompt = p.prompt.split(KEYBASE,1)[0]
-        mainprompt = p.prompt.split(KEYBASE,1)[1] 
-        #self.basebreak = fcountbrk(baseprompt) # No support for inner breaks currently.
-    elif usebase: # Get base by first break as usual.
-        baseprompt = p.prompt.split(KEYBRK,1)[0]
-        mainprompt = p.prompt.split(KEYBRK,1)[1]
-    else:
-        baseprompt = ""
-        mainprompt = p.prompt
-        
+def inpaintmaskdealer(self, p, bratios, usebase, polymask):
+    prompt = p.prompt
+    if self.debug: print("in inpaintmaskdealer",prompt)
+    if KEYCOMM in prompt: prompt = prompt.split(KEYCOMM,1)[1]
+    if KEYBASE in prompt: prompt = prompt.split(KEYBASE,1)[1]
     # Prep masks.
     self.regmasks = []
     tm = None
@@ -827,61 +772,50 @@ def inpaintmaskdealer(self, p, bratios, usebase, polymask, comprompt, comnegprom
     else:
         self.regbase = None
         self.regmasks[0] = t
-    # t = torch.from_numpy(np.zeros([1,512,512], dtype = np.float16)).to(devices.device)
-    # self.regmasks.append(t)
-    # t = torch.from_numpy(np.ones([1,512,512], dtype = np.float16)).to(devices.device)
-    # self.regmasks.append(t)
-    
-    # Convert all keys to breaks, and expand neg to fit.
-    mainprompt = mainprompt.replace(KEYROW,KEYBRK) # Cont: Should be case insensitive.
-    mainprompt = mainprompt.replace(KEYCOL,KEYBRK)
     
     # Simulated region anchroing for base weights.
-    breaks = mainprompt.count(KEYBRK) + int(self.usebase)
+    breaks = prompt.count(KEYBRK)
     self.bratios = split_l2(bratios, DELIMROW, DELIMCOL, fmap = ffloatd(0),
                             basestruct = [[0] * (breaks + 1)], indflip = False)
-    
-    p.prompt = mainprompt
-    if self.usebase:
-        p.prompt = baseprompt + fspace(KEYBRK) + p.prompt
-    npr = p.negative_prompt
-    npr.replace(KEYROW,KEYBRK)
-    npr.replace(KEYCOL,KEYBRK)
-    npr = npr.split(KEYBRK)
-    nbreaks = len(npr) - 1
-    if breaks >= nbreaks: # Repeating the first neg as in orig code.
-        npr.extend([npr[0]] * (breaks - nbreaks))
-    else: # Cut off the excess negs.
-        npr = npr[0:breaks + 1]
-    for i ,n in enumerate(npr):
-        if n.isspace() or n =="":
-            npr[i] = ","
-    # p.negative_prompt = fspace(KEYBRK).join(npr)
-    # p.all_negative_prompts = [p.negative_prompt] * len(p.all_negative_prompts)
-    # p.negative_prompt = fspace(KEYBRK).join(npr)
-    # p.all_negative_prompts = [p.negative_prompt] * len(p.all_negative_prompts)
-    # if comprompt is not None : 
-    #     p.prompt = comprompt + fspace(KEYBRK) + p.prompt
-    #     for i in lange(p.all_prompts):
-    #         p.all_prompts[i] = comprompt + fspace(KEYBRK) + p.all_prompts[i]
-    # if comnegprompt is not None :
-    #     p.negative_prompt = comnegprompt + fspace(KEYBRK) + p.negative_prompt
-    #     for i in lange(p.all_negative_prompts):
-    #         p.all_negative_prompts[i] = comnegprompt + fspace(KEYBRK) + p.all_negative_prompts[i]
-    p = keyreplacer(p)
-    return self, p
+
+def randdealer(self,p,aratios,bratios):
+    # h*w の大きさのテンソルを作成
+    tensor = torch.zeros((p.height//8, p.width//8)).to("cuda")
+    x,y = int(aratios.split(",")[0]),int(aratios.split(",")[1])
 
 
-def keyreplacer(p):
-    '''
-    replace all separators to BREAK
-    p.all_prompt and p.all_negative_prompt
-    '''
-    for key in ALLKEYS:
-        for i in lange(p.all_prompts):
-            p.all_prompts[i]= p.all_prompts[i].replace(key,KEYBRK)
-        
-        for i in lange(p.all_negative_prompts):
-            p.all_negative_prompts[i] = p.all_negative_prompts[i].replace(key,KEYBRK)
 
-    return p
+    # 領域ごとのサイズを計算
+    dh, dw = p.height//8 // x, p.width//8 // y
+    lbreaks = p.prompt.count(KEYBRK) + 1
+
+    bratios = bratios.split(",") if self.usebase else [0]
+    bratios = [float(b) for b in bratios]
+    while len(bratios) <= lbreaks:
+        bratios.append(bratios[0])
+
+    # 領域ごとに0から3までのランダムな値を設定
+    for i in range(x):
+        for j in range(y):
+            random_value = torch.randint(0, lbreaks, (1,))
+            tensor[i*dh:(i+1)*dh, j*dw:(j+1)*dw] = random_value
+    tensors = []
+
+    ranbase = torch.ones_like(tensor)
+
+    for i in range(lbreaks):
+        add = torch.where(tensor==i, 1*(1-bratios[i]),0)
+        tensors.append(add)
+        ranbase = ranbase - add
+
+    drows = []
+    dcells = []
+    for c in range(lbreaks):
+        d = RegionCell(0,0 , 0, 0)
+        dcells.append(d)
+    drow = RegionRow(0, 1, dcells)
+    drows.append(drow)
+
+    self.aratios = drows
+    self.ransors = tensors
+    self.ranbase = ranbase

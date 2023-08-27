@@ -10,6 +10,16 @@
 日本語: [![jp](https://img.shields.io/badge/lang-jp-green.svg)](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/main/README.JP.md)
 
 ### Updates
+- add LoRA stop step
+LoRAを適用するのをやめるstepを指定できます。10 step程度で停止することで浸食、ノイズ等の防止、生成速度の向上を期待できます。
+You can specify the step at which to stop applying LoRA. By stopping around 10 steps, you can expect to prevent erosion and noise, and to improve generation speed.
+(0に設定すると無効になります。0 is disable)
+
+- support SDXL
+- support web-ui 1.5
+
+- add [guide for API users](#how-to-use-via-api)
+
 - prompt mode improved
 - プロンプトモードの動作が改善しました  
 (The process has been adjusted to generate masks in three steps, and to recommence generation from the first stage./3ステップでマスクを生成し、そこから生成を1stepからやり直すよう修正しました)
@@ -58,7 +68,7 @@ This extention is enabled only if "Active" is toggled.
 Prompts for different regions are separated by `BREAK` keywords. 
 Negative prompts can also be set for each area by separating them with `BREAK`, but if `BREAK` is not entered, the same negative prompt will be set for all areas.
 
-Using `ADDROW` or `ADDCOL` anywhere in the prompt will automatically activate [2D region mode](#2d-region-assignment-experimental-function).
+Using `ADDROW` or `ADDCOL` anywhere in the prompt will automatically activate [2D region mode](#2D).
 
 ### Use base prompt
 Check this if you want to use the base prompt, which is the same prompt for all areas. Use this option if you want the prompt to be consistent across all areas.
@@ -84,7 +94,7 @@ Using a `;` separator will automatically activate 2D region mode.
 ### Base ratio
 Sets the ratio of the base prompt; if base ratio is set to 0.2, then resulting images will consist of `20%*BASE_PROMPT + 80%*REGION_PROMPT`. It can also be specified for each region, in the same way as "Divide ratio" - 0.2, 0.3, 0.5, etc. If a single value is entered, the same value will be applied to all areas.
 
-### Divide mode
+### split mode
 Specifies the direction of division. Horizontal and vertical directions can be specified.
 In order to specify both horizontal and vertical regions, see 2D region mode.
 
@@ -300,6 +310,73 @@ Here are samples of a simple prompt, two loras with negative te/unet values per 
 ![MeguminMigurdiaCmp](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/MeguminMigurdiaCmp.jpg)
 
 If you come across any useful insights on the phenomenon, do share.
+
+## How to Use via API
+The following format is used when utilizing this extension via the API.
+
+```
+  "prompt": "green hair twintail BREAK red blouse BREAK blue skirt",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args": [True,False,"Matrix","Vertical","Mask","Prompt","1,1,1","",False,False,False,"Attention",False,"0","0","0",""]
+}}
+```
+Please refer to the table below for each setting in `args`. No. corresponds to the order. When the type is text, please enclose it with `""`. Modes 3-6 ignore submodes that do not correspond to the mode selected in mode 3. For the mask in 17., please specify the address of the image data. Absolute paths or relative paths from the web-ui root can be used. Please create the mask using the color specified in the mask item.
+
+|  No.  |  setting  |choice| type  | default |
+| ---- | ---- |---- |----| ----|
+|  1  |  Active  |True, False|Bool|False| 
+|  2  | debug   |True, False|Bool|False| 
+|  3  | Mode  |Matrix, Mask, Prompt|Text| Matrix|
+|  4  | Mode (Matrix)|Horizontal, Vertical|Text|Horizontal
+|  5  | Mode (Mask)| Mask |Text|Mask 
+|  6  | Mode (Prompt)| Prompt, Prompt-Ex |Text|Prompt
+|  7 |  Ratios||Text|1,1,1
+|  8 |  Base Ratios  |  |Text| 0
+|  9 |  Use Base  |True, False|Bool|False| 
+|  10 | Use Common |True, False|Bool|False| 
+|  11 | Use Neg-Common   |True, False|Bool| False| 
+|  12 | Calcmode| Attention, Latent | Text  | Attention
+|  13 | Not Change AND   |True, False|Bool|False| 
+|  14 | LoRA Textencoder  ||Text|0|  
+|  15 | LoRA U-Net   |  | Text  | 0
+|  16 | Threshold   |  |Text| 0
+|  17 | Mask   |  | Text | 
+
+### Example Settings
+#### Matrix
+```
+  "prompt": "green hair twintail BREAK red blouse BREAK blue skirt",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args": [True,False,"Matrix","Vertical","Mask","Prompt","1,1,1","",False,False,False,"Attention",False,"0","0","0",""]
+}}
+```
+Result
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample1.png)  
+
+#### Mask
+```
+   "prompt": "masterpiece,best quality 8k photo of BREAK (red:1.2) forest BREAK yellow chair BREAK blue dress girl",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args":	[True,False,"Mask","Vertical","Mask","Prompt","1,1,1","",False,True,False,"Attention",False,"0","0","0","mask.png"]
+```
+Mask used
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/mask.png)  
+Result
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample2.png)  
+
+#### Prompt
+```
+ "prompt": "masterpiece,best quality 8k photo of BREAK a girl hair blouse skirt with bag BREAK (red:1.8) ,hair BREAK (green:1.5),blouse BREAK,(blue:1.7), skirt BREAK (yellow:1.7), bag",
+	"alwayson_scripts": {
+		"Regional Prompter": {
+			"args":	[True,False,"Prompt","Vertical","Mask","Prompt-EX","1,1,1","",False,True,False,"Attention",False,"0","0","0.5,0.6,0.5",""]
+}}
+```
+![sample](https://github.com/hako-mikan/sd-webui-regional-prompter/blob/imgs/asample3.png)  
+
 
 ## Acknowledgments
 I thank [furusu](https://note.com/gcem156) for suggesting the Attention couple, [opparco](https://github.com/opparco) for suggesting the Latent couple, and [Symbiomatrix](https://github.com/Symbiomatrix) for helping to create the 2D generation code.

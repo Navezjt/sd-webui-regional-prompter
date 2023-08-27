@@ -9,12 +9,11 @@ from torchvision.transforms import InterpolationMode, Resize  # Mask.
 TOKENSCON = 77
 TOKENS = 75
 
-pmasks = {}
-pmaskshw =[]
-pmasksf = {}
-maskready = False
+def db(self,text):
+    if self.debug:
+        print(text)
 
-def main_forward(module,x,context,mask,divide,isvanilla = False,userpp = False,tokens=[],width = 64,height = 64,step = 0):
+def main_forward(module,x,context,mask,divide,isvanilla = False,userpp = False,tokens=[],width = 64,height = 64,step = 0, isxl = False):
     
     # Forward.
     h = module.heads
@@ -44,25 +43,22 @@ def main_forward(module,x,context,mask,divide,isvanilla = False,userpp = False,t
 
     global pmaskshw,pmasks
 
+    hiresscaler(height,width,attn)
+
     if userpp and step > 0:
         for b in range(attn.shape[0] // 8):
             if pmaskshw == []:
                 pmaskshw = [(height,width)]
-            elif height > pmaskshw[0][0]:
-                del pmaskshw
-                pmaskshw = [(height,width)]
-                global maskready
-                maskready = False
-                pmasks = {}
             elif (height,width) not in pmaskshw:
                 pmaskshw.append((height,width))
 
-            for t in tokens: 
-                add = attn[8*b:8*(b+1),:,t[0]:t[0]+len(t)]**1.2
+            for t in tokens:
+                power = 4 if isxl else 1.2
+                add = attn[8*b:8*(b+1),:,t[0]:t[0]+len(t)]**power
                 add = torch.sum(add,dim = 2)
                 t = f"{t}-{b}"         
                 if t not in pmasks:
-                    pmasks[t] = add * 0
+                    pmasks[t] = add
                 else:
                     if pmasks[t].shape[1] != add.shape[1]:
                         add = add.view(8,height,width)
@@ -88,24 +84,19 @@ def hook_forwards(self, root_module: torch.nn.Module, remove=False):
 ##### Attention mode 
 
 def hook_forward(self, module):
-    def forward(x, context=None, mask=None):
+    def forward(x, context=None, mask=None, additional_tokens=None, n_times_crossframe_attn_in_self=0):
         if self.debug :
             print("input : ", x.size())
             print("tokens : ", context.size())
-            print("module : ", module.lora_layer_name)
+            print("module : ", getattr(module, self.layer_name,None))
 
-        # if not self.calced and "diffusion_model_output_blocks_11_1_transformer_blocks_0_attn2" == module.lora_layer_name:
-        #     self.calced = True
+        if self.xsize == 0: self.xsize = x.shape[1]
+        if "input" in getattr(module, self.layer_name,""):
+            if x.shape[1] > self.xsize:
+                self.in_hr = True
 
-        height = self.h
-        width = self.w
-
-        def hr_cheker(n):
-            return (n != 0) and (n & (n - 1) == 0)
-
-        if not hr_cheker(height * width // x.size()[1]) and self.hr:
-            height = self.hr_h
-            width = self.hr_w
+        height = self.hr_h if self.in_hr and self.hr else self.h 
+        width = self.hr_w if self.in_hr and self.hr else self.w
 
         xs = x.size()[1]
         scale = round(math.sqrt(height * width / xs))
@@ -124,7 +115,7 @@ def hook_forward(self, module):
         # SBM Matrix mode.
         def matsepcalc(x,contexts,mask,pn,divide):
             xs = x.size()[1]
-            (dsh,dsw) = split_dims(xs, height, width, debug = self.debug)
+            (dsh,dsw) = split_dims(xs, height, width, self)
             
             if "Horizontal" in self.mode: # Map columns / rows first to outer / inner.
                 dsout = dsw
@@ -144,20 +135,19 @@ def hook_forward(self, module):
                 if cnet_ext > 0:
                     context = torch.cat([context,contexts[:,-cnet_ext:,:]],dim = 1)
                     
-                i = i + 1 + self.basebreak
-                out = main_forward(module, x, context, mask, divide, self.isvanilla,userpp =True,step = self.step)
+                i = i + 1
+                out = main_forward(module, x, context, mask, divide, self.isvanilla,userpp =True,step = self.step, isxl = self.isxl)
 
                 if len(self.nt) == 1 and not pn:
-                    if self.debug : print("return out for NP")
+                    db(self,"return out for NP")
                     return out
                 # if self.usebase:
                 outb = out.clone()
-                outb = outb.reshape(outb.size()[0], dsh, dsw, outb.size()[2]) 
+                outb = outb.reshape(outb.size()[0], dsh, dsw, outb.size()[2]) if "Ran" not in self.mode else outb
 
             sumout = 0
-
-            if self.debug : print(f"tokens : {tll},pn : {pn}")
-            if self.debug : print([r for r in self.aratios])
+            db(self,f"tokens : {tll},pn : {pn}")
+            db(self,[r for r in self.aratios])
 
             for drow in self.aratios:
                 v_states = []
@@ -170,16 +160,19 @@ def hook_forward(self, module):
                     if cnet_ext > 0:
                         context = torch.cat([context,contexts[:,-cnet_ext:,:]],dim = 1)
                         
-                    if self.debug : print(f"tokens : {tll[i][0]*TOKENSCON}-{tll[i][1]*TOKENSCON}")
+                    db(self,f"tokens : {tll[i][0]*TOKENSCON}-{tll[i][1]*TOKENSCON}")
                     i = i + 1 + dcell.breaks
                     # if i >= contexts.size()[1]: 
                     #     indlast = True
-                    out = main_forward(module, x, context, mask, divide, self.isvanilla,userpp = self.pn, step = self.step)
-                    if self.debug : print(f" dcell.breaks : {dcell.breaks}, dcell.ed : {dcell.ed}, dcell.st : {dcell.st}")
+                    out = main_forward(module, x, context, mask, divide, self.isvanilla,userpp = self.pn, step = self.step, isxl = self.isxl)
+                    db(self,f" dcell.breaks : {dcell.breaks}, dcell.ed : {dcell.ed}, dcell.st : {dcell.st}")
                     if len(self.nt) == 1 and not pn:
-                        if self.debug : print("return out for NP")
+                        db(self,"return out for NP")
                         return out
                     # Actual matrix split by region.
+                    if "Ran" in self.mode:
+                        v_states.append(out)
+                        continue
                     
                     out = out.reshape(out.size()[0], dsh, dsw, out.size()[2]) # convert to main shape.
                     # if indlast:
@@ -203,13 +196,13 @@ def hook_forward(self, module):
                     elif "Vertical" in self.mode: # Cols are the outer list, rows are cells.
                         out = out[:,int(dsh*dcell.st) + addin:int(dsh*dcell.ed),
                                   int(dsw*drow.st) + addout:int(dsw*drow.ed),:]
-                        if self.debug : print(f"{int(dsh*dcell.st) + addin}:{int(dsh*dcell.ed)}-{int(dsw*drow.st) + addout}:{int(dsw*drow.ed)}")
+                        db(self,f"{int(dsh*dcell.st) + addin}:{int(dsh*dcell.ed)}-{int(dsw*drow.st) + addout}:{int(dsw*drow.ed)}")
                         if self.usebase : 
                             # outb_t = outb[:,:,int(dsw*drow.st):int(dsw*drow.ed),:].clone()
                             outb_t = outb[:,int(dsh*dcell.st) + addin:int(dsh*dcell.ed),
                                           int(dsw*drow.st) + addout:int(dsw*drow.ed),:].clone()
                             out = out * (1 - dcell.base) + outb_t * dcell.base
-                    if self.debug : print(f"sumin:{sumin},sumout:{sumout},dsh:{dsh},dsw:{dsw}")
+                    db(self,f"sumin:{sumin},sumout:{sumout},dsh:{dsh},dsw:{dsw}")
             
                     v_states.append(out)
                     if self.debug : 
@@ -220,6 +213,15 @@ def hook_forward(self, module):
                     ox = torch.cat(v_states,dim = 2) # First concat the cells to rows.
                 elif "Vertical" in self.mode:
                     ox = torch.cat(v_states,dim = 1) # Cols first mode, concat to cols.
+                elif "Ran" in self.mode:
+                    if self.usebase:
+                        ox = outb * makerrandman(self.ranbase,dsh,dsw).view(-1, 1)
+                    ox = torch.zeros_like(v_states[0])
+                    for state, filter in zip(v_states, self.ransors):
+                        filter = makerrandman(filter,dsh,dsw)
+                        ox = ox + state * filter.view(-1, 1)
+                    return ox
+
                 h_states.append(ox)
             if "Horizontal" in self.mode:
                 ox = torch.cat(h_states,dim = 1) # Second, concat rows to layer.
@@ -230,7 +232,7 @@ def hook_forward(self, module):
 
         def masksepcalc(x,contexts,mask,pn,divide):
             xs = x.size()[1]
-            (dsh,dsw) = split_dims(xs, height, width, debug = self.debug)
+            (dsh,dsw) = split_dims(xs, height, width, self)
 
             tll = self.pt if pn else self.nt
             
@@ -245,16 +247,16 @@ def hook_forward(self, module):
                     context = torch.cat([context,contexts[:,-cnet_ext:,:]],dim = 1)
                     
                 i = i + 1
-                out = main_forward(module, x, context, mask, divide, self.isvanilla)
+                out = main_forward(module, x, context, mask, divide, self.isvanilla, isxl = self.isxl)
 
                 if len(self.nt) == 1 and not pn:
-                    if self.debug : print("return out for NP")
+                    db(self,"return out for NP")
                     return out
                 # if self.usebase:
                 outb = out.clone()
                 outb = outb.reshape(outb.size()[0], dsh, dsw, outb.size()[2]) 
 
-            if self.debug : print(f"tokens : {tll},pn : {pn}")
+            db(self,f"tokens : {tll},pn : {pn}")
             
             ox = torch.zeros_like(x)
             ox = ox.reshape(ox.shape[0], dsh, dsw, ox.shape[2])
@@ -276,13 +278,13 @@ def hook_forward(self, module):
                 if cnet_ext > 0:
                     context = torch.cat([context,contexts[:,-cnet_ext:,:]],dim = 1)
                     
-                if self.debug : print(f"tokens : {tll[i][0]*TOKENSCON}-{tll[i][1]*TOKENSCON}")
+                db(self,f"tokens : {tll[i][0]*TOKENSCON}-{tll[i][1]*TOKENSCON}")
                 i = i + 1
                 # if i >= contexts.size()[1]: 
                 #     indlast = True
-                out = main_forward(module, x, context, mask, divide, self.isvanilla)
+                out = main_forward(module, x, context, mask, divide, self.isvanilla, isxl = self.isxl)
                 if len(self.nt) == 1 and not pn:
-                    if self.debug : print("return out for NP")
+                    db(self,"return out for NP")
                     return out
                     
                 out = out.reshape(out.size()[0], dsh, dsw, out.size()[2]) # convert to main shape.
@@ -302,7 +304,7 @@ def hook_forward(self, module):
             h_states = []
 
             tll = self.pt if pn else self.nt
-            if self.debug : print(f"tokens : {tll},pn : {pn}")
+            db(self,f"tokens : {tll},pn : {pn}")
 
             for i, tl in enumerate(tll):
                 context = contexts[:, tl[0] * TOKENSCON : tl[1] * TOKENSCON, :]
@@ -311,17 +313,17 @@ def hook_forward(self, module):
                 if cnet_ext > 0:
                     context = torch.cat([context,contexts[:,-cnet_ext:,:]],dim = 1)
                 
-                if self.debug : print(f"tokens : {tl[0]*TOKENSCON}-{tl[1]*TOKENSCON}")
+                db(self,f"tokens : {tl[0]*TOKENSCON}-{tl[1]*TOKENSCON}")
 
-                userpp = self.pn and i == 0
+                userpp = self.pn and i == 0 and self.pfirst
 
-                out = main_forward(module, x, context, mask, divide, self.isvanilla, userpp = userpp, width = dsw, height = dsh, tokens = self.pe, step = self.step)
+                out = main_forward(module, x, context, mask, divide, self.isvanilla, userpp = userpp, width = dsw, height = dsh, tokens = self.pe, step = self.step, isxl = self.isxl)
 
-                if (len(self.nt) == 1 and not pn) or (self.modep and self.calcmode =="Latent"):
-                    if self.debug : print("return out for NP or Latent")
+                if (len(self.nt) == 1 and not pn) or ("Pro" in self.mode and "La" in self.calc):
+                    db(self,"return out for NP or Latent")
                     return out
 
-                if self.debug : print(scale, dsh, dsw, dsh * dsw, x.size()[1])
+                db(self,[scale, dsh, dsw, dsh * dsw, x.size()[1]])
 
                 if i == 0:
                     outb = out.clone()
@@ -339,8 +341,7 @@ def hook_forward(self, module):
 
             ox = outb.clone() if self.ex else outb * 0
 
-            if self.debug:
-                print(pmaskshw,maskready,(dsh,dsw) in pmaskshw and maskready,len(pmasksf),len(h_states))
+            db(self,[pmaskshw,maskready,(dsh,dsw) in pmaskshw and maskready,len(pmasksf),len(h_states)])
 
             if (dsh,dsw) in pmaskshw and maskready:
                 depth = pmaskshw.index((dsh,dsw))
@@ -360,23 +361,23 @@ def hook_forward(self, module):
                 return outb
 
         if self.eq:
-            if self.debug : print("same token size and divisions")
-            if self.indmaskmode:
+            db(self,"same token size and divisions")
+            if "Mas" in self.mode:
                 ox = masksepcalc(x, contexts, mask, True, 1)
-            elif self.cells:
-                ox = matsepcalc(x, contexts, mask, True, 1)
-            else:
+            elif "Pro" in self.mode:
                 ox = promptsepcalc(x, contexts, mask, True, 1)
-        elif x.size()[0] == 1 * self.batch_size:
-            if self.debug : print("different tokens size")
-            if self.indmaskmode:
-                ox = masksepcalc(x, contexts, mask, self.pn, 1)
-            elif self.cells:
-                ox = matsepcalc(x, contexts, mask, self.pn, 1)
             else:
+                ox = matsepcalc(x, contexts, mask, True, 1)
+        elif x.size()[0] == 1 * self.batch_size:
+            db(self,"different tokens size")
+            if "Mas" in self.mode:
+                ox = masksepcalc(x, contexts, mask, self.pn, 1)
+            elif "Pro" in self.mode:
                 ox = promptsepcalc(x, contexts, mask, self.pn, 1)
+            else:
+                ox = matsepcalc(x, contexts, mask, self.pn, 1)
         else:
-            if self.debug : print("same token size and different divisions")
+            db(self,"same token size and different divisions")
             # SBM You get 2 layers of x, context for pos/neg.
             # Each should be forwarded separately, pairing them up together.
             if self.isvanilla: # SBM Ddim reverses cond/uncond.
@@ -385,17 +386,17 @@ def hook_forward(self, module):
             else:
                 px, nx = x.chunk(2)
                 conp,conn = contexts.chunk(2)
-            if self.indmaskmode:
+            if "Mas" in self.mode:
                 opx = masksepcalc(px, conp, mask, True, 2)
                 onx = masksepcalc(nx, conn, mask, False, 2)
-            elif self.cells:
+            elif "Pro" in self.mode:
+                opx = promptsepcalc(px, conp, mask, True, 2)
+                onx = promptsepcalc(nx, conn, mask, False, 2)
+            else:
                 # SBM I think division may have been an incorrect patch.
                 # But I'm not sure, haven't tested beyond DDIM / PLMS.
                 opx = matsepcalc(px, conp, mask, True, 2)
                 onx = matsepcalc(nx, conn, mask, False, 2)
-            else:
-                opx = promptsepcalc(px, conp, mask, True, 2)
-                onx = promptsepcalc(nx, conn, mask, False, 2)
             if self.isvanilla: # SBM Ddim reverses cond/uncond.
                 ox = torch.cat([onx, opx])
             else:
@@ -403,16 +404,18 @@ def hook_forward(self, module):
 
         self.count += 1
 
-        if self.count == 16:
+        limit = 70 if self.isxl else 16
+
+        if self.count == limit:
             self.pn = not self.pn
             self.count = 0
-        if self.debug : print(f"output : {ox.size()}")
+            self.pfirst = False
+        db(self,f"output : {ox.size()}")
         return ox
 
     return forward
 
-
-def split_dims(xs, height, width, **kwargs):
+def split_dims(xs, height, width, self):
     """Split an attention layer dimension to height + width.
     
     Originally, the estimate was dsh = sqrt(hw_ratio*xs),
@@ -436,8 +439,13 @@ def split_dims(xs, height, width, **kwargs):
     scale = math.ceil(math.log2(math.sqrt(height * width / xs)))
     dsh = repeat_div(height,scale)
     dsw = repeat_div(width,scale)
-    if kwargs.get("debug",False) : print(scale,dsh,dsw,dsh*dsw,xs)
-    
+    if xs > dsh * dsw and hasattr(self,"nei_multi"):
+        dsh, dsw = self.nei_multi[1], self.nei_multi[0] 
+        while dsh*dsw != xs:
+            dsh, dsw = dsh//2, dsw//2
+
+    if self.debug : print(scale,dsh,dsw,dsh*dsw,xs, height, width)
+
     return dsh,dsw
 
 def repeat_div(x,y):
@@ -453,6 +461,11 @@ def repeat_div(x,y):
 
 #################################################################################
 ##### for Prompt mode
+pmasks = {}              #maked from attention maps
+pmaskshw =[]            #height,width set of u-net blocks
+pmasksf = {}             #maked from pmasks for regions
+maskready = False
+
 def reset_pmasks(self): # init parameters in every batch
     global pmasks, pmaskshw, pmasksf, maskready
     self.step = 0
@@ -462,16 +475,35 @@ def reset_pmasks(self): # init parameters in every batch
     maskready = False
     self.x = None
     self.rebacked = False
-    return self
-
 
 def savepmasks(self,processed):
-    print(len(pmasks),len(self.pe),len(self.th))
     for mask ,th in zip(pmasks.values(),self.th):
         img, _ , _= makepmask(mask, self.h, self.w,th, self.step)
         processed.images.append(img)
     return processed
 
+def hiresscaler(height,width,attn):
+    global pmaskshw,pmasks,pmasksf
+    if pmaskshw != []:
+        if height > pmaskshw[0][0]: # [0][0] has largest height, if in hires, height will be larger than [0][0]
+            (oh, ow) = pmaskshw[0]
+            del pmaskshw
+            pmaskshw = [(height,width)]
+            hiresmask(pmasks,oh, ow, height, width,attn[:,:,0])
+            for i in range(4):
+                m = (2 ** (i))
+                hiresmask(pmasksf,oh//m, ow//m, height//m,width//m ,torch.zeros(1,height*width //m**2,1),i = i )
+
+def hiresmask(masks,oh,ow,nh,nw,at,i = None):
+    for key in masks.keys():
+        mask = masks[key] if i is None else masks[key][i]
+        mask = mask.view(8 if i is None else 1,oh,ow)
+        mask = F.resize(mask,(nh,nw))
+        mask = mask.reshape_as(at)
+        if i is None:
+            masks[key] = mask
+        else:
+            masks[key][i] = mask
 
 def makepmask(mask, h, w, th, step, bratio = 1): # make masks from attention cache return [for preview, for attention, for Latent]
     th = th - step * 0.005
@@ -488,3 +520,14 @@ def makepmask(mask, h, w, th, step, bratio = 1): # make masks from attention cac
     mask = mask.reshape(h*w)
     mask = torch.where(mask > 0.1 ,1,0)
     return img,mask * bratio , lmask * bratio
+
+def makerrandman(mask, h, w, latent = False): # make masks from attention cache return [for preview, for attention, for Latent]
+    mask = mask.float()
+    mask = mask.view(1,mask.shape[0],mask.shape[1]) 
+    img = torchvision.transforms.functional.to_pil_image(mask)
+    img = img.resize((w,h))
+    mask = F.resize(mask,(h,w),interpolation=F.InterpolationMode.NEAREST)
+    if latent: return mask
+    mask = mask.reshape(h*w)
+    mask = torch.round(mask).long()
+    return mask
